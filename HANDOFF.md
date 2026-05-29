@@ -145,11 +145,16 @@ ICD Snap_mac_win_app/
 - That's it. WebView (WKWebView) is part of the OS.
 
 ### Windows
+- **rustup** — install from <https://rustup.rs>. The Windows installer
+  defaults to the `x86_64-pc-windows-msvc` toolchain (what you want).
+  **The rustup installer will offer to install the Visual Studio Build
+  Tools 2022 for you (~1.3 GB download).** Say yes — it covers the
+  next bullet automatically. No need to install Build Tools separately.
 - **Microsoft Visual Studio 2022 Build Tools** with the
   "Desktop development with C++" workload — provides the MSVC linker and
   C runtime that the Rust `x86_64-pc-windows-msvc` toolchain links against.
-- **rustup** — the Windows installer defaults to the
-  `x86_64-pc-windows-msvc` toolchain (what you want).
+  Installed by rustup as above; just verify the "Desktop development with
+  C++" workload checkbox is checked during the VS Installer step.
 - **Node.js 18+** for Windows.
 - **WebView2 Runtime** — preinstalled on Windows 11. On Windows 10 the
   Tauri installer will download it during install (or the user can pre-
@@ -235,6 +240,70 @@ Output (`src-tauri\target\release\bundle\`):
 Either one is a valid installer; ship whichever your audience prefers. The
 MSI is more enterprise-friendly; the NSIS .exe is smaller and a friendlier
 double-click flow for individual users.
+
+#### 6.3.1 Windows build gotchas (learned the hard way)
+
+These are the practical tripwires when doing the first Windows build,
+especially if the project was originally developed on macOS. Hitting any
+of them produces opaque error messages — save yourself the hour.
+
+1. **Put the project at a space-free path.** Use `C:\dev\icdsnap` rather
+   than `C:\Users\<you>\Desktop\ICD Snap_Win`. Tauri/cargo *usually*
+   handle spaces, but rusqlite's build script and `cargo metadata`
+   occasionally trip on them with cryptic errors. The fix is cheap, so
+   just avoid the problem.
+
+2. **Purge macOS metadata files (`._*`) before building on Windows.**
+   If the project lived on iCloud Drive, an external drive, or any
+   non-HFS volume on macOS, the OS scattered AppleDouble metadata
+   files (`._default.json`, `._tauri.conf.json`, etc.) throughout the
+   tree. They're invisible on Mac, fully visible on Windows, and Tauri
+   chokes when its config loader reads one expecting UTF-8 JSON:
+
+   ```
+   failed to read file 'capabilities\._default.json':
+   stream did not contain valid UTF-8
+   ```
+
+   Clean them on the Windows side before the first build:
+
+   ```cmd
+   cd C:\dev\icdsnap
+   for /r %i in (._*) do @del "%i"
+   ```
+
+   Or via PowerShell (more reliable, handles edge cases):
+
+   ```cmd
+   powershell -Command "Get-ChildItem -Path . -Recurse -Force | Where-Object { $_.Name -like '._*' } | Remove-Item -Force"
+   ```
+
+   The repo's `.gitignore` excludes `._*` so this is a one-time
+   cleanup *if you use Git* (recommended). For ZIP/USB transfers the
+   metadata travels with the files — clean on Windows each time.
+
+3. **Open a fresh terminal after installing rustup.** The installer
+   updates `PATH`, but already-open `cmd`/PowerShell windows won't see
+   it. Symptom: `npm run tauri build` fails with `failed to run 'cargo
+   metadata' command... program not found`. Close and reopen the
+   terminal, verify with `cargo --version`, then retry.
+
+4. **"Desktop development with C++" workload must be checked in the
+   Visual Studio Installer.** rustup auto-checks it during its
+   first-time setup, but if you ran the VS Installer separately and
+   unchecked it, the rust toolchain has no linker. Re-run the VS
+   Installer → Modify → tick the workload.
+
+5. **SmartScreen warning on first run is expected.** The installer
+   isn't code-signed (see §6.5), so Windows shows "Windows protected
+   your PC". Users click "More info" → "Run anyway". To eliminate the
+   warning, buy a code-signing certificate and configure it per §6.5.
+
+6. **Don't trust output silence.** `for /r %i in (._*) do @del "%i"`
+   produces no output whether it found files or not (the `@` suppresses
+   the echo). Always verify with `dir /s /b /a ._*` afterwards — if
+   nothing matches, you'll get "File Not Found", which is the success
+   case.
 
 **WebView2.** Tauri's default `tauri.conf.json` doesn't specify a WebView2
 install mode. On Windows 11 WebView2 is preinstalled. On older Windows 10
@@ -641,6 +710,26 @@ See [Appendix B](#appendix-b--hardening-lemon-squeezy).
     might be ~50 KB; one with 2000 unique chars ~200 KB. Still tiny vs.
     the unsubset 2 MB.
 
+11. **macOS `._*` metadata files break Windows builds.** When the
+    project lives on iCloud Drive or any non-HFS volume, macOS writes
+    AppleDouble metadata files (`._default.json`, etc.) alongside
+    every real file. They're invisible on macOS but visible on Windows,
+    and Tauri's config loader fails with `stream did not contain
+    valid UTF-8` when it tries to parse one. The repo's `.gitignore`
+    excludes `._*`, so Git-based transfers are safe. For ZIP/USB
+    transfers, clean on Windows before building (see §6.3.1 #2). When
+    setting up a new Snap-series project, add `._*` to `.gitignore`
+    on day one.
+
+12. **GitHub Actions default token is read-only.** New repos created
+    after ~mid-2023 get a workflow `GITHUB_TOKEN` with read-only
+    `contents` permission by default. The `tauri-action` needs write
+    access to create the Release, and the token must also be
+    *explicitly* passed via `env: GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}`.
+    Without both, builds succeed but fail at the publish step with
+    `Error: GITHUB_TOKEN is required` — see Appendix A for the
+    workflow that already includes both fixes.
+
 ---
 
 ## 14. Testing
@@ -744,6 +833,8 @@ on:
 
 jobs:
   build:
+    permissions:
+      contents: write          # required to create the Release
     strategy:
       fail-fast: false
       matrix:
@@ -778,6 +869,7 @@ jobs:
       - name: build with tauri
         uses: tauri-apps/tauri-action@v0
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # required by tauri-action
           # macOS signing (omit for unsigned builds)
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -793,6 +885,28 @@ jobs:
 On a release push (e.g. `git tag v1.0.0 && git push --tags`) this builds
 a universal macOS DMG and a Windows MSI + NSIS and attaches them to a
 draft GitHub Release for you to review and publish.
+
+> **Why both `permissions: contents: write` AND the `GITHUB_TOKEN` env
+> var?** Two separate requirements. The `permissions:` block widens
+> the auto-token's scope from read-only (the post-2023 default for new
+> repos) to read+write so it's *allowed* to create a release. The env
+> var is needed because `tauri-action` reads `GITHUB_TOKEN` from the
+> environment, not from the implicit context — without it the action
+> exits early with `Error: GITHUB_TOKEN is required`. Omit either and
+> the build succeeds (15+ minutes) but produces no Release. This bit
+> us on the first attempted CI build; both lines are non-optional.
+
+> **PAT `workflow` scope (one-time, for the developer pushing).** When
+> first pushing this workflow file from a local machine, the developer's
+> Personal Access Token must have the **`workflow`** scope in addition
+> to `repo`. Otherwise `git push` is rejected with `refusing to allow
+> a Personal Access Token to create or update workflow ... without
+> workflow scope`. Fix: edit the PAT at
+> <https://github.com/settings/tokens>, tick `workflow`, save. This is
+> distinct from the `GITHUB_TOKEN` discussed above — the PAT is *your
+> credential to push code*; `GITHUB_TOKEN` is *the runner's credential
+> to create a release*. Same word "token", entirely different scopes
+> and lifetimes.
 
 ---
 
