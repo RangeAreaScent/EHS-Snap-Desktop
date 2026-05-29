@@ -599,11 +599,26 @@ See [Appendix B](#appendix-b--hardening-lemon-squeezy).
    tools handle it but some need quoting. Always quote paths in shell
    commands.
 
-6. **DMG creation runs `osascript`** to set the window layout. Can fail
-   silently on headless CI. If it does, the `.app` is still built — you
-   can hand-create a DMG with `hdiutil`. Adding `xvfb`-style display
-   isn't necessary; just ensure the macOS CI runner has access to the
-   AppleScript engine (the standard GitHub `macos-latest` runner does).
+6. **DMG creation runs `osascript`** to set the window layout — can fail
+   silently when AppleScript can't reach Finder (CI, non-interactive
+   shells, automation tools without Accessibility permission). The `.app`
+   is still built; only the final DMG packaging aborts. Hand-create a DMG
+   with `hdiutil` as a fallback — produces a clean drag-to-Applications
+   DMG without any AppleScript:
+   ```bash
+   cd src-tauri/target/universal-apple-darwin/release/bundle
+   rm -f "macos/rw."*".dmg"             # clean abandoned bundle_dmg tempfile
+   mkdir -p _dmg_staging
+   cp -R "macos/ICD Snap.app" _dmg_staging/
+   ln -sf /Applications _dmg_staging/Applications
+   hdiutil create -fs HFS+ -volname "ICD Snap" \
+       -srcfolder _dmg_staging -format UDZO -ov \
+       "dmg/ICD Snap_1.0.0_universal.dmg"
+   rm -rf _dmg_staging
+   ```
+   This is what we used to produce the shipped universal DMG. The GitHub
+   `macos-latest` runner has AppleScript access and `bundle_dmg.sh` works
+   there — only local sandboxed shells hit the failure.
 
 7. **Premium override layering:** effective unlock is
    `real_license OR override`. The hidden rhythm toggles the override
