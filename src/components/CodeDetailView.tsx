@@ -14,7 +14,7 @@ export function CodeDetailView({ code }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [addingToCollection, setAddingToCollection] = useState(false);
-  const { isFavorite, toggleFavorite } = useAppData();
+  const { isFavorite, toggleFavorite, notes } = useAppData();
 
   useEffect(() => {
     if (!code) {
@@ -82,9 +82,11 @@ export function CodeDetailView({ code }: Props) {
     blockDescription: detail.blockDescription,
   };
 
+  const note = notes[detail.code];
   const fullDetail = [
     detail.code,
     detail.description,
+    note?.text && `Note: ${note.text}`,
     detail.isBillable ? "Billable" : "Non-billable",
     detail.chapterDescription && `Chapter: ${detail.chapterDescription}`,
     detail.blockDescription && `Block: ${detail.blockDescription}`,
@@ -138,6 +140,16 @@ export function CodeDetailView({ code }: Props) {
           >
             Copy code + description
           </button>
+          {note?.text && (
+            <button
+              className="copy-btn"
+              onClick={() =>
+                copy("codeNote", `${detail.code}\n${note.text}`)
+              }
+            >
+              Copy code + Note
+            </button>
+          )}
           <button className="copy-btn" onClick={() => copy("full", fullDetail)}>
             Copy full detail
           </button>
