@@ -1,11 +1,40 @@
 # ICD Snap Desktop — Handoff Document
 
+<!-- snap-series:manager-block:start -->
+- **App:** ICD Snap
+- **Platform:** desktop
+- **Wave:** 1
+- **Stage:** 3 release  (0 spec / 1 scaffold / 2 features / 3 release / shipped)
+- **Last updated:** 2026-05-29
+- **Repo:** https://github.com/RangeAreaScent/ICD-Snap-Desktop
+- **Latest release:** v1.0.0 (draft, 2026-05-29) — 4 artifacts attached (universal DMG, MSI, NSIS .exe, .app.tar.gz)
+- **Latest CI:** success on v1.0.0 (Mac universal + Windows both green)
+- **Bundle id:** com.ryan.icdsnap
+- **Dataset:** `icd10cm_2026.sqlite`, ~98K rows (74,714 billable), 40 MB, license: public domain (CDC / NCHS)
+- **Deviations from playbook:** none
+- **Active blockers:**
+  - Apple Developer cert not acquired → Mac DMG unsigned, Gatekeeper warning on other Macs
+  - Windows code-signing cert not acquired → SmartScreen warning on install
+  - Lemon Squeezy store + product not created → license activation untested end-to-end
+  - `product_id` check in `license.rs` still a no-op (constant = 0)
+- **Next 3 steps:**
+  1. Publish the v1.0.0 draft release on GitHub
+  2. Create the Lemon Squeezy store + ICD Snap Premium product (activation limit = 2), then set the `product_id` constant per HANDOFF Appendix B
+  3. Decide timing of Apple Developer enrollment → first signed/notarized Mac DMG
+- **Report-back trigger:** any `v*` tag push, any commit touching `license.rs` / `tauri.conf.json` / `.github/workflows/`, any Lemon Squeezy milestone (product created, first key sold), any signing config change
+<!-- snap-series:manager-block:end -->
+
 > Last updated 2026-05-29. App version 1.0.0.
 > Repository: <https://github.com/RangeAreaScent/ICD-Snap-Desktop>
 >
-> This document is the canonical reference for picking up, maintaining,
-> shipping, and extending ICD Snap Desktop. It's intentionally detailed —
-> read sections 1–6 first, then dip into the rest as needed.
+> **Series context.** ICD Snap is one of nine apps in the Snap series.
+> For series-wide conventions, the live cross-app dashboard, and the
+> bootstrap prompts for Claude sessions, see
+> `../Snap Series Plan/` (especially `SNAP_SERIES_GUIDE.md` and
+> `SNAP_SERIES_STATUS.md`). This document is the canonical reference
+> for the **desktop side of ICD Snap specifically**.
+>
+> Read sections 1–6 first, then dip into the rest as needed.
 
 ---
 
