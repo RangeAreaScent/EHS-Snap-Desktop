@@ -1,6 +1,7 @@
 # ICD Snap Desktop — Handoff Document
 
-> Last updated 2026-05-22. App version 1.0.0.
+> Last updated 2026-05-29. App version 1.0.0.
+> Repository: <https://github.com/RangeAreaScent/ICD-Snap-Desktop>
 >
 > This document is the canonical reference for picking up, maintaining,
 > shipping, and extending ICD Snap Desktop. It's intentionally detailed —
@@ -37,9 +38,14 @@ iOS app — a fast, offline ICD-10-CM medical code lookup tool. It shares no
 code with the iOS app; the iOS source (sibling folder `ICD Snap/`) is the
 product reference only.
 
-**Status as of handoff:** feature-complete. macOS (Apple Silicon) has been
-packaged and verified end-to-end. Windows packaging requires a Windows
-machine or CI (steps below).
+**Status as of handoff:** feature-complete.
+- macOS universal DMG (Intel + Apple Silicon) packaged and verified
+  locally end-to-end.
+- Both macOS and Windows are built by the GitHub Actions CI workflow
+  on every `v*` tag push (see §6.6 and Appendix A).
+- Apple Developer signing and a Windows code-signing certificate are
+  **not yet configured** — current artifacts are unsigned. Users see a
+  Gatekeeper / SmartScreen warning on first launch.
 
 **Core promise:** "Find ICD-10-CM codes in 2 seconds. No ads, no
 subscription, works offline."
@@ -197,7 +203,11 @@ kills all node processes).
 
 ## 6. Building for distribution
 
-### 6.1 macOS — Apple Silicon (already done)
+### 6.1 macOS — Apple Silicon only
+
+> Useful for fast local debugging. **Don't ship this as the public Mac
+> release** — Intel Macs will refuse to launch it. The universal build
+> below is what goes on the Releases page.
 
 ```bash
 npm run tauri build
@@ -207,11 +217,7 @@ Output (`src-tauri/target/release/bundle/`):
 - `macos/ICD Snap.app` (~49 MB — includes the 40 MB ICD DB)
 - `dmg/ICD Snap_1.0.0_aarch64.dmg` (~10 MB — DMGs compress aggressively)
 
-The DMG is what you distribute. The `.app` inside is the actual application.
-
-**The binary is arm64 only.** Intel Macs will refuse to launch it.
-
-### 6.2 macOS — Universal (Intel + Apple Silicon)
+### 6.2 macOS — Universal (Intel + Apple Silicon, what ships)
 
 ```bash
 rustup target add x86_64-apple-darwin
@@ -355,6 +361,52 @@ etc., or an EV cert for SmartScreen reputation). Add to
 }
 ```
 
+### 6.6 Cutting a release
+
+The shipping path is **tag-driven CI** — push a `v*` tag and the workflow
+builds Mac universal + Windows in parallel and attaches the artifacts to a
+draft GitHub Release. The full sequence:
+
+1. **Bump the version in four places** (they must all match):
+   - `src-tauri/Cargo.toml` → `version = "1.0.1"`
+   - `src-tauri/tauri.conf.json` → `"version": "1.0.1"`
+   - `package.json` → `"version": "1.0.1"`
+   - `HANDOFF.md` header → `App version 1.0.1`
+2. **Commit on `main`** with a `chore: bump to vX.Y.Z` message.
+3. **Tag and push:**
+   ```bash
+   git tag v1.0.1
+   git push origin main v1.0.1
+   ```
+4. **Watch the CI run:**
+   ```bash
+   gh run watch                          # live status of the latest run
+   gh run view --log-failed              # if anything fails, scoped logs
+   ```
+5. **Review the draft release** at
+   `https://github.com/RangeAreaScent/ICD-Snap-Desktop/releases` — confirm
+   the Mac `.dmg` and the Windows `.msi` + `.exe` are attached and have
+   sensible sizes (Mac ~18 MB DMG, Windows ~13 MB MSI).
+6. **Smoke-test** at least the universal DMG on Apple Silicon (and Intel
+   if you have access). See §14 for the checklist.
+7. **Publish** the draft release in the GitHub UI when satisfied.
+
+#### Redoing a botched tag
+
+CI can fail after a tag is pushed (the failed run leaves a draft release
+with partial or no artifacts attached). To redo cleanly:
+
+```bash
+gh release delete v1.0.1 --cleanup-tag --yes   # removes the draft + tag
+git fetch --tags --prune --prune-tags          # sync local view
+# fix whatever was broken, commit on main
+git tag v1.0.1                                  # re-tag from new HEAD
+git push origin v1.0.1                          # re-trigger CI
+```
+
+This is exactly what we did to recover the initial `v1.0.0` after the
+Apple-codesign workflow misconfiguration was fixed (see §13 #13).
+
 ---
 
 ## 7. Architecture
@@ -489,10 +541,12 @@ Use this to jump straight to where a feature lives.
 
 ## 9. Configuration
 
-Version is in three places — bump them together on a release:
+Version is in four places — bump them together on a release (see §6.6
+for the full release flow):
 - `src-tauri/Cargo.toml` — `version = "1.0.0"`
 - `src-tauri/tauri.conf.json` — `"version": "1.0.0"`
 - `package.json` — `"version": "1.0.0"`
+- `HANDOFF.md` header — `App version 1.0.0`
 
 Bundle identifier (`com.ryan.icdsnap`) and product name (`ICD Snap`) live
 in `src-tauri/tauri.conf.json`. Don't change the identifier post-launch
@@ -730,6 +784,25 @@ See [Appendix B](#appendix-b--hardening-lemon-squeezy).
     `Error: GITHUB_TOKEN is required` — see Appendix A for the
     workflow that already includes both fixes.
 
+13. **Don't pass `APPLE_*` env vars on CI until you actually have a
+    Developer ID cert.** If `APPLE_SIGNING_IDENTITY` is set as a
+    secret (even partially set, or set to a stale value) but the
+    matching `.p12` isn't imported into a keychain on the runner, the
+    macOS build runs for ~15 min compiling everything and then dies at
+    bundling with:
+    ```
+    error: The specified item could not be found in the keychain.
+    failed codesign application: failed to run command codesign
+    ```
+    Tauri attempts to sign because *some* identity env var was provided;
+    it cannot find the cert; the whole job fails. Fix: leave the
+    `APPLE_*` env block out of the workflow until the full set
+    (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`,
+    `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`) is configured as
+    repo secrets. The current `.github/workflows/build.yml` ships
+    *without* the APPLE_* lines for this reason — see the comment block
+    inside it for the one-shot edit to add them when ready.
+
 ---
 
 ## 14. Testing
@@ -757,8 +830,10 @@ testing them in isolation is straightforward when you want to add Vitest.
 ### Manual smoke test (every release)
 - [ ] Search: "hypertension" (description) / "I10" (code) / "HTN"
       (abbreviation) — all return relevant results.
-- [ ] Code detail: click a result → details + 3 copy buttons all paste
-      correctly into a text app.
+- [ ] Code detail: click a result → details + copy buttons all paste
+      correctly into a text app (4 buttons when a note exists: code only,
+      code + description, code + note, full detail; 3 when no note).
+      Full detail includes the note inline.
 - [ ] Favorite: ☆ a code → switches state → appears in Favorites tab →
       survives app restart.
 - [ ] Collection: create → add codes → ⋯ menu → CSV exports correctly
@@ -813,6 +888,14 @@ export APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)"
 export APPLE_ID="you@example.com"
 export APPLE_PASSWORD="app-specific-password"
 export APPLE_TEAM_ID="TEAMID"
+
+# release / CI flow (gh CLI)
+git tag v1.0.1 && git push origin main v1.0.1   # trigger CI on tag
+gh run watch                                     # live status of latest run
+gh run list --workflow=build.yml --limit 5       # recent runs
+gh run view <id> --log-failed                    # only failed steps' logs
+gh release view v1.0.1                           # check draft release
+gh release delete v1.0.1 --cleanup-tag --yes     # nuke a botched tag+release
 ```
 
 ---
@@ -870,11 +953,15 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # required by tauri-action
-          # macOS signing (omit for unsigned builds)
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # No Apple signing yet — produces unsigned artifacts. Once an
+          # Apple Developer cert is available, add these as repo secrets
+          # and pass them here:
+          #   APPLE_CERTIFICATE          (base64 of the exported .p12)
+          #   APPLE_CERTIFICATE_PASSWORD
+          #   APPLE_SIGNING_IDENTITY     ("Developer ID Application: Name (TEAMID)")
+          #   APPLE_ID
+          #   APPLE_PASSWORD             (app-specific password)
+          #   APPLE_TEAM_ID
         with:
           args: ${{ matrix.args }}
           tagName: ${{ github.ref_name }}
