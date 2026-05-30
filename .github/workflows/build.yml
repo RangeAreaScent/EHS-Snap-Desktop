@@ -13,8 +13,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
-            args: --target universal-apple-darwin
           - platform: windows-latest
             args: ''
 
@@ -29,8 +27,6 @@ jobs:
 
       - name: setup rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: cache cargo
         uses: swatinem/rust-cache@v2
@@ -44,15 +40,11 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No Apple signing yet — produces unsigned artifacts. Once an
-          # Apple Developer cert is available, add these as repo secrets
-          # and pass them here:
-          #   APPLE_CERTIFICATE          (base64 of the exported .p12)
-          #   APPLE_CERTIFICATE_PASSWORD
-          #   APPLE_SIGNING_IDENTITY     ("Developer ID Application: Name (TEAMID)")
-          #   APPLE_ID
-          #   APPLE_PASSWORD             (app-specific password)
-          #   APPLE_TEAM_ID
+          # Windows-only build. The macOS DMG is built locally on the dev
+          # Mac and uploaded to the same draft release via the
+          # `snap-release-mac <tag>` helper (see HANDOFF §6). Apple
+          # signing therefore happens against the local Keychain, not
+          # via repo secrets.
         with:
           args: ${{ matrix.args }}
           tagName: ${{ github.ref_name }}
