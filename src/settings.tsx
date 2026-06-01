@@ -78,6 +78,7 @@ interface StoredSettings {
   theme?: Theme;
   fontFamily?: FontFamily;
   fontSize?: FontSize;
+  hasSeenOnboarding?: boolean;
 }
 
 interface LicenseState {
@@ -93,6 +94,8 @@ interface SettingsCtx {
   setFontFamily: (f: FontFamily) => void;
   fontSize: FontSize;
   setFontSize: (s: FontSize) => void;
+  hasSeenOnboarding: boolean;
+  dismissOnboarding: () => void;
   unlocked: boolean;
   licenseKey: string | null;
   activateLicense: (key: string) => Promise<void>;
@@ -107,6 +110,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>("system");
   const [fontFamily, setFontFamilyState] = useState<FontFamily>("system");
   const [fontSize, setFontSizeState] = useState<FontSize>("medium");
+  const [hasSeenOnboarding, setHasSeenOnboarding] = useState<boolean>(false);
   const [license, setLicense] = useState<LicenseState>({
     unlocked: false,
     key: null,
@@ -121,6 +125,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         if (data?.theme) setThemeState(data.theme);
         if (data?.fontFamily) setFontFamilyState(data.fontFamily);
         if (data?.fontSize) setFontSizeState(data.fontSize);
+        if (data?.hasSeenOnboarding) setHasSeenOnboarding(true);
       })
       .finally(() => {
         loaded.current = true;
@@ -140,10 +145,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   // Persist whenever any setting changes (after the initial load).
   useEffect(() => {
     if (!loaded.current) return;
-    storeWrite("settings", { theme, fontFamily, fontSize }).catch((e) =>
-      console.error("failed to persist settings:", e),
-    );
-  }, [theme, fontFamily, fontSize]);
+    storeWrite("settings", {
+      theme,
+      fontFamily,
+      fontSize,
+      hasSeenOnboarding,
+    }).catch((e) => console.error("failed to persist settings:", e));
+  }, [theme, fontFamily, fontSize, hasSeenOnboarding]);
 
   // Apply theme. A premium theme only takes effect while premium is unlocked.
   useEffect(() => {
@@ -179,6 +187,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setLicense(await invoke<LicenseState>("license_toggle_override"));
   }, []);
 
+  const dismissOnboarding = useCallback(() => {
+    setHasSeenOnboarding(true);
+  }, []);
+
   return (
     <SettingsContext.Provider
       value={{
@@ -188,6 +200,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         setFontFamily: setFontFamilyState,
         fontSize,
         setFontSize: setFontSizeState,
+        hasSeenOnboarding,
+        dismissOnboarding,
         unlocked: license.unlocked,
         licenseKey: license.key,
         activateLicense,

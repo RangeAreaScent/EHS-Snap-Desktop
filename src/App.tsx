@@ -3,11 +3,12 @@ import "./styles.css";
 import { CodeDetailView } from "./components/CodeDetailView";
 import { CollectionsView } from "./components/CollectionsView";
 import { FavoritesView } from "./components/FavoritesView";
+import { OnboardingView } from "./components/OnboardingView";
 import { PremiumPromptModal } from "./components/PremiumPromptModal";
 import { SearchView } from "./components/SearchView";
 import { SettingsView } from "./components/SettingsView";
 import { AppDataProvider, useAppData } from "./state";
-import { SettingsProvider } from "./settings";
+import { SettingsProvider, useSettings } from "./settings";
 
 type Tab = "search" | "favorites" | "collections" | "settings";
 
@@ -25,6 +26,7 @@ function AppShell() {
   const [tab, setTab] = useState<Tab>("search");
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
   const { premiumPrompt, clearPremiumPrompt } = useAppData();
+  const { hasSeenOnboarding, dismissOnboarding } = useSettings();
 
   // ⌘F / Ctrl+F jumps to the Search tab.
   useEffect(() => {
@@ -101,6 +103,10 @@ function AppShell() {
             setTab("settings");
           }}
         />
+      )}
+
+      {!hasSeenOnboarding && (
+        <OnboardingView onDismiss={dismissOnboarding} />
       )}
     </div>
   );

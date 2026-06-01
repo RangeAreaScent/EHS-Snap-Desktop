@@ -1288,3 +1288,104 @@ button {
   background: var(--accent);
   color: #fff;
 }
+
+/* ---- first-launch onboarding ---- */
+.onboarding-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+.onboarding {
+  width: 460px;
+  max-width: 100%;
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  background: var(--pane);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.32);
+  padding: 36px 32px 28px;
+  text-align: center;
+}
+
+.onboarding__icon {
+  width: 112px;
+  height: 112px;
+  display: block;
+  margin: 0 auto 18px;
+}
+
+.onboarding__title {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.onboarding__tagline {
+  font-size: 13.5px;
+  color: var(--text-dim);
+  margin-bottom: 26px;
+}
+
+.onboarding__features {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-align: left;
+  margin-bottom: 22px;
+}
+
+.onboarding__feature {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.onboarding__feature-icon {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.onboarding__feature-text {
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.onboarding__footer {
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+
+.onboarding__cta {
+  width: 100%;
+  padding: 13px 18px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14.5px;
+  font-weight: 700;
+  border: none;
+}
+
+.onboarding__cta:hover {
+  filter: brightness(1.06);
+}
