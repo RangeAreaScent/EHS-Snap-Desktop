@@ -5,12 +5,13 @@
 - **Platform:** desktop
 - **Wave:** 1
 - **Stage:** 3 release  (0 spec / 1 scaffold / 2 features / 3 release / shipped)
-- **Last updated:** 2026-05-29
+- **Last updated:** 2026-05-30
 - **Repo:** https://github.com/RangeAreaScent/ICD-Snap-Desktop
-- **Latest release:** v1.0.0 (draft, 2026-05-29) — 4 artifacts attached (universal DMG, MSI, NSIS .exe, .app.tar.gz)
-- **Latest CI:** success on v1.0.0 (Mac universal + Windows both green)
+- **Latest release:** v1.0.0 (draft, 2026-05-29) — 4 artifacts attached (universal DMG, MSI, NSIS .exe, .app.tar.gz). Awaiting user publish click.
+- **Latest CI:** success on v1.0.0. **Note:** workflow has since been simplified to Windows-only on CI (commit `4b1c1d0`); Mac DMG is now produced locally via `tauri build` + `hdiutil` fallback (see §13 gotcha #6).
 - **Bundle id:** com.ryan.icdsnap
 - **Dataset:** `icd10cm_2026.sqlite`, ~98K rows (74,714 billable), 40 MB, license: public domain (CDC / NCHS)
+- **Dataset update cadence:** Annual (Oct 1, U.S. FY rollover), next refresh window 2026-10 for FY 2027
 - **Deviations from playbook:** none
 - **Active blockers:**
   - Apple Developer cert not acquired → Mac DMG unsigned, Gatekeeper warning on other Macs
@@ -18,16 +19,18 @@
   - Lemon Squeezy store + product not created → license activation untested end-to-end
   - `product_id` check in `license.rs` still a no-op (constant = 0)
 - **Next 3 steps:**
-  1. Publish the v1.0.0 draft release on GitHub
+  1. Publish the v1.0.0 draft release on GitHub (Mac universal DMG attached locally; Windows artifacts from CI)
   2. Create the Lemon Squeezy store + ICD Snap Premium product (activation limit = 2), then set the `product_id` constant per HANDOFF Appendix B
   3. Decide timing of Apple Developer enrollment → first signed/notarized Mac DMG
-- **Report-back trigger:** any `v*` tag push, any commit touching `license.rs` / `tauri.conf.json` / `.github/workflows/`, any Lemon Squeezy milestone (product created, first key sold), any signing config change
+- **Report-back trigger:** any `v*` tag push, any commit touching `license.rs` / `tauri.conf.json` / `.github/workflows/`, any Lemon Squeezy milestone (product created, first key sold), any signing config change, any new dataset bundled
 <!-- snap-series:manager-block:end -->
 
 > Last updated 2026-05-29. App version 1.0.0.
 > Repository: <https://github.com/RangeAreaScent/ICD-Snap-Desktop>
 >
-> **Series context.** ICD Snap is one of nine apps in the Snap series.
+> **Series context.** ICD Snap is one of ten apps in the Snap series
+> (Wave 1: ICD, Code, Drug, HCPCS, NAICS, Tariff — Wave 2: DOT, LOINC,
+> NIOSH, IRS).
 > For series-wide conventions, the live cross-app dashboard, and the
 > bootstrap prompts for Claude sessions, see
 > `../Snap Series Plan/` (especially `SNAP_SERIES_GUIDE.md` and
@@ -121,14 +124,17 @@ ICD Snap_mac_win_app/
 ├── app-icon-rounded.png            ← macOS-style rounded version
 ├── src/                            ← React/TS frontend
 │   ├── main.tsx                    ← React root + bundled font imports
-│   ├── App.tsx                     ← Providers + tab shell + premium modal
+│   ├── App.tsx                     ← Providers + tab shell + premium modal + onboarding overlay
 │   ├── state.tsx                   ← AppDataProvider (favorites, collections,
 │   │                                   notes, freemium limits, prompt)
-│   ├── settings.tsx                ← SettingsProvider (theme, font, size, license)
+│   ├── settings.tsx                ← SettingsProvider (theme, font, size,
+│   │                                   hasSeenOnboarding, license)
 │   ├── api.ts                      ← Tauri invoke wrappers
 │   ├── export.ts                   ← CSV / PDF export drivers
 │   ├── types.ts
 │   ├── styles.css                  ← Theme variable blocks + all UI styles
+│   ├── assets/
+│   │   └── app-icon.png            ← bundled by vite for in-UI rendering (onboarding hero)
 │   └── components/
 │       ├── SearchView.tsx
 │       ├── FavoritesView.tsx
@@ -136,6 +142,7 @@ ICD Snap_mac_win_app/
 │       ├── CodeRow.tsx
 │       ├── CodeDetailView.tsx      ← detail pane, copy buttons, notes section
 │       ├── SettingsView.tsx        ← appearance, premium, data, about
+│       ├── OnboardingView.tsx      ← first-launch full-screen overlay (icon hero + 4 features + CTA)
 │       ├── Modal.tsx
 │       ├── AddToCollectionModal.tsx
 │       ├── AddCodeModal.tsx
@@ -353,12 +360,23 @@ into the installer (~150 MB larger), edit `tauri.conf.json`:
 }
 ```
 
-### 6.4 GitHub Actions CI (recommended for Windows)
+### 6.4 GitHub Actions CI — Windows-only (as currently shipped)
 
-If you don't have a Windows machine, the cleanest path is a GitHub Actions
-workflow that builds Mac and Windows on every push or tag. See
-[Appendix A](#appendix-a--sample-github-actions-ci) for a ready-to-paste
-`.github/workflows/build.yml`.
+The shipped workflow (`.github/workflows/build.yml`) builds **only the
+Windows artifacts** on tag push. Mac is intentionally excluded from CI
+and is built locally on the maintainer's Mac via the §6.1 / §6.2 flow.
+
+Why: locally we can drive the universal Mac DMG end-to-end (including
+the `hdiutil` fallback in §13 gotcha #6 when `bundle_dmg.sh` chokes on
+sandboxed shells), and we get to inspect the `.app` before publishing.
+GitHub's macOS runner can do the build but adds compile time + DMG
+quirks without giving us anything the local build doesn't already
+produce.
+
+Appendix A still includes the older Mac+Windows matrix as a reference
+sample if you want to flip CI to do both — useful if/when there's no
+local Mac to drive releases from. The minimal Windows-only workflow
+that's currently shipped is what you'll find in the repo.
 
 ### 6.5 Code signing & notarization
 
@@ -392,33 +410,47 @@ etc., or an EV cert for SmartScreen reputation). Add to
 
 ### 6.6 Cutting a release
 
-The shipping path is **tag-driven CI** — push a `v*` tag and the workflow
-builds Mac universal + Windows in parallel and attaches the artifacts to a
-draft GitHub Release. The full sequence:
+The shipping path is **split: CI builds Windows, local builds Mac.**
+Push a `v*` tag and the workflow produces the Windows MSI + NSIS .exe
+in a draft GitHub Release. In parallel (or after), build the Mac
+universal DMG locally and attach it to the same draft. The full
+sequence:
 
 1. **Bump the version in four places** (they must all match):
    - `src-tauri/Cargo.toml` → `version = "1.0.1"`
    - `src-tauri/tauri.conf.json` → `"version": "1.0.1"`
    - `package.json` → `"version": "1.0.1"`
-   - `HANDOFF.md` header → `App version 1.0.1`
+   - `HANDOFF.md` header (manager-block + the preamble's
+     `App version` line) → `1.0.1`
 2. **Commit on `main`** with a `chore: bump to vX.Y.Z` message.
 3. **Tag and push:**
    ```bash
    git tag v1.0.1
    git push origin main v1.0.1
    ```
-4. **Watch the CI run:**
+4. **Watch the Windows CI run:**
    ```bash
    gh run watch                          # live status of the latest run
    gh run view --log-failed              # if anything fails, scoped logs
    ```
-5. **Review the draft release** at
+5. **Build the Mac universal DMG locally:**
+   ```bash
+   rustup target add x86_64-apple-darwin   # one-time
+   npm run tauri build -- --target universal-apple-darwin
+   # if bundle_dmg.sh fails, use the hdiutil fallback from §13 gotcha #6
+   ```
+6. **Attach the Mac DMG to the draft release** that CI created:
+   ```bash
+   gh release upload v1.0.1 \
+     "src-tauri/target/universal-apple-darwin/release/bundle/dmg/ICD Snap_1.0.1_universal.dmg"
+   ```
+7. **Review the draft release** at
    `https://github.com/RangeAreaScent/ICD-Snap-Desktop/releases` — confirm
-   the Mac `.dmg` and the Windows `.msi` + `.exe` are attached and have
-   sensible sizes (Mac ~18 MB DMG, Windows ~13 MB MSI).
-6. **Smoke-test** at least the universal DMG on Apple Silicon (and Intel
+   the Mac `.dmg` and the Windows `.msi` + `.exe` are all attached and
+   have sensible sizes (Mac ~18 MB DMG, Windows ~13 MB MSI).
+8. **Smoke-test** at least the universal DMG on Apple Silicon (and Intel
    if you have access). See §14 for the checklist.
-7. **Publish** the draft release in the GitHub UI when satisfied.
+9. **Publish** the draft release in the GitHub UI when satisfied.
 
 #### Redoing a botched tag
 
@@ -488,16 +520,22 @@ Modules in `src-tauri/src/`:
   import "@fontsource/atkinson-hyperlegible/700.css";
   ```
 - **`App.tsx`** — wraps everything in `<SettingsProvider><AppDataProvider>`,
-  then `<AppShell>` (tab state + content + PremiumPromptModal).
+  then `<AppShell>` (tab state + content + PremiumPromptModal + first-launch
+  OnboardingView overlay gated by `hasSeenOnboarding`).
 - **`state.tsx` — AppDataProvider** — exposes favorites, collections, notes,
   the freemium limits (`favoritesMax`, `collectionsMax`), and the pending
   `premiumPrompt`. Internally uses `usePersistentState` which loads once
   and persists on every change.
-- **`settings.tsx` — SettingsProvider** — theme, fontFamily, fontSize, and
-  the license state. Settings persist together as one `settings.json` doc.
-  Theme application uses a `data-theme` attribute on `<html>`. Font family
-  sets the `--ui-font` CSS variable. Text size calls
-  `getCurrentWebview().setZoom(factor)`.
+- **`settings.tsx` — SettingsProvider** — theme, fontFamily, fontSize,
+  hasSeenOnboarding, and the license state. Settings persist together as
+  one `settings.json` doc. Theme application uses a `data-theme` attribute
+  on `<html>`. Font family sets the `--ui-font` CSS variable. Text size
+  calls `getCurrentWebview().setZoom(factor)`.
+- **`components/OnboardingView.tsx`** — first-launch full-screen overlay.
+  Shows the app icon (loaded from `src/assets/app-icon.png`, vite-bundled),
+  app name, tagline, 4 feature rows, footer, and a Get Started CTA. On
+  dismiss it sets `hasSeenOnboarding = true` and the overlay never returns
+  unless the user clears `settings.json`. Theme-aware via CSS variables.
 - **`api.ts`** — `searchCodes`, `getCodeDetail`, `storeRead`, `storeWrite`.
 - **`export.ts`** — collection → CSV (built in JS, written via the dialog
   plugin + the `write_text_file` Rust command) or PDF (calls the Rust
@@ -533,7 +571,7 @@ Files written:
 - `favorites.json` — `Favorite[]`
 - `collections.json` — `Collection[]` (each with `items[]`)
 - `notes.json` — `Record<code, {text, editedAt}>`
-- `settings.json` — `{theme, fontFamily, fontSize}`
+- `settings.json` — `{theme, fontFamily, fontSize, hasSeenOnboarding}`
 - `license.json` — `{unlocked, key, instanceId}`
 - `premium_override.json` — JSON bool (`true` / `false`)
 
@@ -564,7 +602,8 @@ Use this to jump straight to where a feature lives.
 | Freemium limits | `state.tsx` `FREE_FAVORITES_MAX`, `FREE_COLLECTIONS_MAX` | — |
 | Premium prompt modal | `components/PremiumPromptModal.tsx`, `App.tsx` | — |
 | Hidden rhythm | `SettingsView.tsx` `useSecretRhythm` + Version row | `license::toggle_override` |
-| App icon | `src-tauri/icons/`, `app-icon-*.png` | — |
+| App icon (OS dock / installer) | `src-tauri/icons/`, `app-icon-*.png` | — |
+| First-launch onboarding | `components/OnboardingView.tsx`, `src/assets/app-icon.png`, `settings.tsx` `hasSeenOnboarding` | — |
 
 ---
 
