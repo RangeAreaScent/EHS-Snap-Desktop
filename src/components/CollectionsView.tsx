@@ -1,16 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { exportCollectionCSV, exportCollectionPDF } from "../export";
 import { useAppData } from "../state";
-import type { Collection } from "../types";
+import {
+  selectedItemKey,
+  type Collection,
+  type SelectedItem,
+} from "../types";
+import { useListKeyNav, type NavItem } from "../hooks/useListKeyNav";
 import { AddCodeModal } from "./AddCodeModal";
 import { CollectionFormModal } from "./CollectionFormModal";
 
 interface Props {
-  selectedCode: string | null;
-  onSelect: (code: string) => void;
+  selectedItem: SelectedItem;
+  onSelectItem: (item: SelectedItem) => void;
 }
 
-export function CollectionsView({ selectedCode, onSelect }: Props) {
+export function CollectionsView({ selectedItem, onSelectItem }: Props) {
   const { collections } = useAppData();
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -25,8 +31,8 @@ export function CollectionsView({ selectedCode, onSelect }: Props) {
     return (
       <CollectionDetail
         collection={open}
-        selectedCode={selectedCode}
-        onSelect={onSelect}
+        selectedItem={selectedItem}
+        onSelectItem={onSelectItem}
         onBack={() => setOpenId(null)}
       />
     );
@@ -68,7 +74,7 @@ function CollectionList({ onOpen }: { onOpen: (id: string) => void }) {
         {collections.length === 0 && (
           <div className="state-msg">
             <p className="state-msg__title">No collections yet</p>
-            <p>Group related codes — e.g. "Annual physical", "Diabetes".</p>
+            <p>Group regulations, LOIs, and chemicals — e.g. "LOTO program", "Site A audit".</p>
           </div>
         )}
         {collections.map((c) => (
@@ -81,7 +87,7 @@ function CollectionList({ onOpen }: { onOpen: (id: string) => void }) {
             <span className="collection-row__main">
               <span className="collection-row__name">{c.name}</span>
               <span className="collection-row__count">
-                {c.items.length} code{c.items.length === 1 ? "" : "s"}
+                {c.items.length} item{c.items.length === 1 ? "" : "s"}
               </span>
             </span>
             <span className="collection-row__chevron">›</span>
@@ -103,15 +109,15 @@ function CollectionList({ onOpen }: { onOpen: (id: string) => void }) {
 
 interface DetailProps {
   collection: Collection;
-  selectedCode: string | null;
-  onSelect: (code: string) => void;
+  selectedItem: SelectedItem;
+  onSelectItem: (item: SelectedItem) => void;
   onBack: () => void;
 }
 
 function CollectionDetail({
   collection,
-  selectedCode,
-  onSelect,
+  selectedItem,
+  onSelectItem,
   onBack,
 }: DetailProps) {
   const { notes, renameCollection, deleteCollection, removeFromCollection } =
@@ -120,6 +126,28 @@ function CollectionDetail({
   const [modal, setModal] = useState<"rename" | "addcode" | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Phase A: keyboard navigation over the collection's items.
+  const navItems = useMemo<NavItem[]>(
+    () =>
+      collection.items.map((item) => ({
+        key:
+          item.kind === "regulation"
+            ? `reg:${item.id}`
+            : item.kind === "loi"
+              ? `loi:${item.id}`
+              : `chem:${item.id}`,
+        onSelect: () => {
+          if (item.kind === "regulation")
+            onSelectItem({ kind: "regulation", id: item.id });
+          else if (item.kind === "loi")
+            onSelectItem({ kind: "loi", id: item.id });
+          else onSelectItem({ kind: "chemical", name: item.id });
+        },
+      })),
+    [collection.items, onSelectItem],
+  );
+  useListKeyNav(navItems, selectedItemKey(selectedItem));
 
   useEffect(() => {
     function onDown(e: MouseEvent) {
@@ -131,6 +159,21 @@ function CollectionDetail({
     return () => document.removeEventListener("mousedown", onDown);
   }, []);
 
+  // Phase A — ⌘E exports this open collection as PDF. Lives here (not in
+  // App.tsx) so the handler captures the current `collection` + `notes`.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key.toLowerCase() !== "e") return;
+      if (collection.items.length === 0) return;
+      e.preventDefault();
+      void exportPDF();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collection, notes]);
+
   function flash(msg: string) {
     setStatusMsg(msg);
     setTimeout(() => setStatusMsg((m) => (m === msg ? null : m)), 2000);
@@ -140,9 +183,9 @@ function CollectionDetail({
     setMenuOpen(false);
     if (collection.items.length === 0) return;
     await navigator.clipboard.writeText(
-      collection.items.map((i) => i.code).join(", "),
+      collection.items.map((i) => i.sublabel || i.id).join(", "),
     );
-    flash("Codes copied");
+    flash("Citations copied");
   }
 
   async function exportCSV() {
@@ -156,7 +199,7 @@ function CollectionDetail({
 
   async function exportPDF() {
     setMenuOpen(false);
-    if (collection.items.length === 0) return;
+    if (collection.items.length === 0) return; // items includes all kinds
     try {
       if (await exportCollectionPDF(collection, notes)) flash("PDF saved");
     } catch (e) {
@@ -164,13 +207,13 @@ function CollectionDetail({
     }
   }
 
-  function confirmDelete() {
+  async function confirmDelete() {
     setMenuOpen(false);
-    if (
-      window.confirm(
-        `Delete "${collection.name}"? This cannot be undone.`,
-      )
-    ) {
+    const ok = await ask(`Delete "${collection.name}"? This cannot be undone.`, {
+      title: "Delete collection",
+      kind: "warning",
+    });
+    if (ok) {
       deleteCollection(collection.id);
       onBack();
     }
@@ -187,7 +230,7 @@ function CollectionDetail({
           <div>
             <div className="collection-head__name">{collection.name}</div>
             <div className="collection-head__count">
-              {collection.items.length} code
+              {collection.items.length} item
               {collection.items.length === 1 ? "" : "s"}
             </div>
           </div>
@@ -209,10 +252,10 @@ function CollectionDetail({
                   setModal("addcode");
                 }}
               >
-                Add code
+                Add regulation
               </button>
               <button className="menu__item" onClick={copyAll}>
-                Copy all codes
+                Copy all citations
               </button>
               <button className="menu__item" onClick={exportCSV}>
                 Export as CSV…
@@ -244,50 +287,72 @@ function CollectionDetail({
         {collection.items.length === 0 && (
           <div className="state-msg">
             <p className="state-msg__title">Empty collection</p>
-            <p>Use the ⋯ menu to add codes.</p>
+            <p>Use ⋯ to add regulations, or the + button on any LOI or chemical.</p>
           </div>
         )}
-        {collection.items.map((item) => (
-          <div
-            key={item.code}
-            className={`code-row${
-              item.code === selectedCode ? " code-row--selected" : ""
-            }`}
-            role="button"
-            tabIndex={0}
-            onClick={() => onSelect(item.code)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                onSelect(item.code);
-              }
-            }}
-          >
-            <div className="code-row__main">
-              <div className="code-row__top">
-                <span className="code-row__code">{item.code}</span>
-                {item.isBillable ? (
-                  <span className="badge badge--billable">Billable</span>
-                ) : (
-                  <span className="badge badge--nonbillable">
-                    Non-billable
-                  </span>
-                )}
-              </div>
-              <div className="code-row__desc">{item.description}</div>
-            </div>
-            <button
-              className="star-btn"
-              title="Remove from collection"
-              onClick={(e) => {
-                e.stopPropagation();
-                removeFromCollection(collection.id, item.code);
+        {collection.items.map((item) => {
+          const isSelected =
+            selectedItem != null &&
+            ((selectedItem.kind === "regulation" && item.kind === "regulation" && selectedItem.id === item.id) ||
+             (selectedItem.kind === "loi" && item.kind === "loi" && selectedItem.id === item.id) ||
+             (selectedItem.kind === "chemical" && item.kind === "chemical" && selectedItem.name === item.id));
+
+          function handleSelect() {
+            if (item.kind === "regulation") onSelectItem({ kind: "regulation", id: item.id });
+            else if (item.kind === "loi") onSelectItem({ kind: "loi", id: item.id });
+            else if (item.kind === "chemical") onSelectItem({ kind: "chemical", name: item.id });
+          }
+
+          const navKey =
+            item.kind === "regulation"
+              ? `reg:${item.id}`
+              : item.kind === "loi"
+                ? `loi:${item.id}`
+                : `chem:${item.id}`;
+          return (
+            <div
+              key={item.id}
+              className={`code-row${isSelected ? " code-row--selected" : ""}`}
+              data-nav-key={navKey}
+              role="button"
+              tabIndex={0}
+              onClick={handleSelect}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleSelect();
+                }
               }}
             >
-              ✕
-            </button>
-          </div>
-        ))}
+              <div className="code-row__main">
+                <div className="code-row__top">
+                  {item.kind === "loi" && (
+                    <span className="badge badge--loi">LOI</span>
+                  )}
+                  <span className="code-row__code">{item.sublabel || item.id}</span>
+                  {item.agency && item.kind === "regulation" && (
+                    <span
+                      className={`badge ${item.agency === "OSHA" ? "badge--osha" : "badge--msha"}`}
+                    >
+                      {item.agency}
+                    </span>
+                  )}
+                </div>
+                <div className="code-row__desc">{item.label}</div>
+              </div>
+              <button
+                className="star-btn"
+                title="Remove from collection"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeFromCollection(collection.id, item.id);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       {statusMsg && <div className="inline-status">{statusMsg}</div>}

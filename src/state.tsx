@@ -10,15 +10,19 @@ import {
 import { storeRead, storeWrite } from "./api";
 import { useSettings } from "./settings";
 import type {
+  ChemicalSummary,
   Collection,
   CollectionItem,
-  Favorite,
+  FavoriteChemical,
+  FavoriteLoi,
+  FavoriteRegulation,
+  LoiSummary,
   NoteMap,
-  SearchResult,
+  RegulationSummary,
 } from "./types";
 
 /** Free-tier capacity. Premium unlocks unlimited. */
-export const FREE_FAVORITES_MAX = 15;
+export const FREE_FAVORITES_MAX = 15;      // regulation favorites only
 export const FREE_COLLECTIONS_MAX = 10;
 
 /** Loads a JSON document once, then persists every change atomically. */
@@ -55,40 +59,111 @@ function usePersistentState<T>(
   return [value, update, ready];
 }
 
-function toItem(item: SearchResult): CollectionItem {
+// ---------- snapshot helpers ----------
+
+export function toCollectionItem(item: RegulationSummary): CollectionItem {
   return {
-    code: item.code,
-    description: item.description,
-    isBillable: item.isBillable,
-    chapterDescription: item.chapterDescription,
+    kind: "regulation",
+    id: item.regulationId,
+    label: item.heading,
+    sublabel: item.citation,
+    agency: item.agency,
     addedAt: Date.now(),
   };
 }
 
+export function toLoiCollectionItem(item: LoiSummary): CollectionItem {
+  return {
+    kind: "loi",
+    id: item.loiId,
+    label: item.title,
+    sublabel: item.issueDate,
+    agency: null,
+    addedAt: Date.now(),
+  };
+}
+
+export function toChemicalCollectionItem(item: ChemicalSummary): CollectionItem {
+  return {
+    kind: "chemical",
+    id: item.substanceName,
+    label: item.substanceName,
+    sublabel: item.oshaPelTwa ? `PEL TWA ${item.oshaPelTwa}` : "No PEL TWA",
+    agency: null,
+    addedAt: Date.now(),
+  };
+}
+
+function toFavorite(item: RegulationSummary): FavoriteRegulation {
+  return {
+    regulationId: item.regulationId,
+    citation: item.citation,
+    heading: item.heading,
+    agency: item.agency,
+    subpartLabel: item.subpartLabel,
+    addedAt: Date.now(),
+  };
+}
+
+function toFavoriteLoi(item: LoiSummary): FavoriteLoi {
+  return {
+    loiId: item.loiId,
+    title: item.title,
+    issueDate: item.issueDate,
+    addedAt: Date.now(),
+  };
+}
+
+function toFavoriteChemical(item: ChemicalSummary): FavoriteChemical {
+  return {
+    substanceName: item.substanceName,
+    oshaPelTwa: item.oshaPelTwa,
+    idlh: item.idlh,
+    isOshaCarcinogen: item.isOshaCarcinogen,
+    addedAt: Date.now(),
+  };
+}
+
+// ---------- context interface ----------
+
 interface AppData {
   ready: boolean;
 
-  favorites: Favorite[];
-  isFavorite: (code: string) => boolean;
-  toggleFavorite: (item: SearchResult) => void;
-  removeFavorite: (code: string) => void;
+  // --- Regulation favorites (capped in free tier) ---
+  favorites: FavoriteRegulation[];
+  isFavorite: (regulationId: string) => boolean;
+  toggleFavorite: (item: RegulationSummary) => void;
+  removeFavorite: (regulationId: string) => void;
 
+  // --- LOI favorites (uncapped — separate entity kind) ---
+  favoriteLois: FavoriteLoi[];
+  isFavoriteLoi: (loiId: string) => boolean;
+  toggleFavoriteLoi: (item: LoiSummary) => void;
+  removeFavoriteLoi: (loiId: string) => void;
+
+  // --- Chemical favorites (uncapped — separate entity kind) ---
+  favoriteChemicals: FavoriteChemical[];
+  isFavoriteChemical: (substanceName: string) => boolean;
+  toggleFavoriteChemical: (item: ChemicalSummary) => void;
+  removeFavoriteChemical: (substanceName: string) => void;
+
+  // --- Collections ---
   collections: Collection[];
   createCollection: (name: string, emoji: string) => string | null;
   renameCollection: (id: string, name: string, emoji: string) => void;
   deleteCollection: (id: string) => void;
-  addToCollection: (id: string, item: SearchResult) => void;
-  removeFromCollection: (id: string, code: string) => void;
-  isInCollection: (id: string, code: string) => boolean;
+  addToCollection: (id: string, item: CollectionItem) => void;
+  removeFromCollection: (collectionId: string, itemId: string) => void;
+  isInCollection: (collectionId: string, itemId: string) => boolean;
 
+  // --- Notes ---
   notes: NoteMap;
-  setNote: (code: string, text: string) => void;
-  deleteNote: (code: string) => void;
+  setNote: (key: string, text: string) => void;
+  deleteNote: (key: string) => void;
 
-  /** Effective caps — Infinity when premium is unlocked. */
+  // --- Freemium ---
   favoritesMax: number;
   collectionsMax: number;
-  /** A pending "this needs premium" message, or null. */
   premiumPrompt: string | null;
   promptPremium: (message: string) => void;
   clearPremiumPrompt: () => void;
@@ -98,10 +173,21 @@ const AppDataContext = createContext<AppData | null>(null);
 
 export function AppDataProvider({ children }: { children: ReactNode }) {
   const { unlocked } = useSettings();
-  const [favorites, updateFavorites, favReady] = usePersistentState<Favorite[]>(
-    "favorites",
-    [],
-  );
+
+  // Regulation favorites — stored as "favorites" for back-compat.
+  const [favorites, updateFavorites, favReady] = usePersistentState<
+    FavoriteRegulation[]
+  >("favorites", []);
+
+  // LOI favorites — separate JSON doc so the regulation cap isn't polluted.
+  const [favoriteLois, updateFavoriteLois, favLoisReady] = usePersistentState<
+    FavoriteLoi[]
+  >("favorites.loi", []);
+
+  // Chemical favorites — separate JSON doc.
+  const [favoriteChemicals, updateFavoriteChemicals, favChemReady] =
+    usePersistentState<FavoriteChemical[]>("favorites.chemicals", []);
+
   const [collections, updateCollections, colReady] = usePersistentState<
     Collection[]
   >("collections", []);
@@ -119,47 +205,101 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   }, []);
   const clearPremiumPrompt = useCallback(() => setPremiumPrompt(null), []);
 
+  // -------- Regulation favorites --------
+
   const isFavorite = useCallback(
-    (code: string) => favorites.some((f) => f.code === code),
+    (regulationId: string) =>
+      favorites.some((f) => f.regulationId === regulationId),
     [favorites],
   );
 
   const toggleFavorite = useCallback(
-    (item: SearchResult) => {
-      const exists = favorites.some((f) => f.code === item.code);
-      // Removing is always allowed; only adding past the cap is blocked.
+    (item: RegulationSummary) => {
+      const exists = favorites.some(
+        (f) => f.regulationId === item.regulationId,
+      );
       if (!exists && favorites.length >= favoritesMax) {
         setPremiumPrompt(
-          `The free plan keeps up to ${FREE_FAVORITES_MAX} favorites. ` +
+          `The free plan keeps up to ${FREE_FAVORITES_MAX} regulation favorites. ` +
             `Unlock unlimited favorites with premium.`,
         );
         return;
       }
       updateFavorites((prev) => {
-        if (prev.some((f) => f.code === item.code)) {
-          return prev.filter((f) => f.code !== item.code);
+        if (prev.some((f) => f.regulationId === item.regulationId)) {
+          return prev.filter((f) => f.regulationId !== item.regulationId);
         }
-        return [
-          {
-            code: item.code,
-            description: item.description,
-            isBillable: item.isBillable,
-            chapterDescription: item.chapterDescription,
-            addedAt: Date.now(),
-          },
-          ...prev,
-        ];
+        return [toFavorite(item), ...prev];
       });
     },
     [favorites, favoritesMax, updateFavorites],
   );
 
   const removeFavorite = useCallback(
-    (code: string) => {
-      updateFavorites((prev) => prev.filter((f) => f.code !== code));
+    (regulationId: string) => {
+      updateFavorites((prev) =>
+        prev.filter((f) => f.regulationId !== regulationId),
+      );
     },
     [updateFavorites],
   );
+
+  // -------- LOI favorites --------
+
+  const isFavoriteLoi = useCallback(
+    (loiId: string) => favoriteLois.some((f) => f.loiId === loiId),
+    [favoriteLois],
+  );
+
+  const toggleFavoriteLoi = useCallback(
+    (item: LoiSummary) => {
+      updateFavoriteLois((prev) => {
+        if (prev.some((f) => f.loiId === item.loiId)) {
+          return prev.filter((f) => f.loiId !== item.loiId);
+        }
+        return [toFavoriteLoi(item), ...prev];
+      });
+    },
+    [updateFavoriteLois],
+  );
+
+  const removeFavoriteLoi = useCallback(
+    (loiId: string) => {
+      updateFavoriteLois((prev) => prev.filter((f) => f.loiId !== loiId));
+    },
+    [updateFavoriteLois],
+  );
+
+  // -------- Chemical favorites --------
+
+  const isFavoriteChemical = useCallback(
+    (substanceName: string) =>
+      favoriteChemicals.some((f) => f.substanceName === substanceName),
+    [favoriteChemicals],
+  );
+
+  const toggleFavoriteChemical = useCallback(
+    (item: ChemicalSummary) => {
+      updateFavoriteChemicals((prev) => {
+        if (prev.some((f) => f.substanceName === item.substanceName)) {
+          return prev.filter((f) => f.substanceName !== item.substanceName);
+        }
+        return [toFavoriteChemical(item), ...prev];
+      });
+    },
+    [updateFavoriteChemicals],
+  );
+
+  const removeFavoriteChemical = useCallback(
+    (substanceName: string) => {
+      updateFavoriteChemicals((prev) =>
+        prev.filter((f) => f.substanceName !== substanceName),
+      );
+    },
+    [updateFavoriteChemicals],
+  );
+
+  // -------- Collections --------
 
   const createCollection = useCallback(
     (name: string, emoji: string): string | null => {
@@ -197,13 +337,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   );
 
   const addToCollection = useCallback(
-    (id: string, item: SearchResult) => {
+    (id: string, item: CollectionItem) => {
       updateCollections((prev) =>
         prev.map((c) => {
-          if (c.id !== id || c.items.some((i) => i.code === item.code)) {
-            return c;
-          }
-          return { ...c, items: [...c.items, toItem(item)] };
+          if (c.id !== id || c.items.some((i) => i.id === item.id)) return c;
+          return { ...c, items: [...c.items, item] };
         }),
       );
     },
@@ -211,11 +349,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   );
 
   const removeFromCollection = useCallback(
-    (id: string, code: string) => {
+    (collectionId: string, itemId: string) => {
       updateCollections((prev) =>
         prev.map((c) =>
-          c.id === id
-            ? { ...c, items: c.items.filter((i) => i.code !== code) }
+          c.id === collectionId
+            ? { ...c, items: c.items.filter((i) => i.id !== itemId) }
             : c,
         ),
       );
@@ -224,28 +362,30 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   );
 
   const isInCollection = useCallback(
-    (id: string, code: string) =>
+    (collectionId: string, itemId: string) =>
       collections
-        .find((c) => c.id === id)
-        ?.items.some((i) => i.code === code) ?? false,
+        .find((c) => c.id === collectionId)
+        ?.items.some((i) => i.id === itemId) ?? false,
     [collections],
   );
 
+  // -------- Notes --------
+
   const setNote = useCallback(
-    (code: string, text: string) => {
+    (key: string, text: string) => {
       updateNotes((prev) => ({
         ...prev,
-        [code]: { text, editedAt: Date.now() },
+        [key]: { text, editedAt: Date.now() },
       }));
     },
     [updateNotes],
   );
 
   const deleteNote = useCallback(
-    (code: string) => {
+    (key: string) => {
       updateNotes((prev) => {
         const next = { ...prev };
-        delete next[code];
+        delete next[key];
         return next;
       });
     },
@@ -255,11 +395,19 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   return (
     <AppDataContext.Provider
       value={{
-        ready: favReady && colReady && notesReady,
+        ready: favReady && favLoisReady && favChemReady && colReady && notesReady,
         favorites,
         isFavorite,
         toggleFavorite,
         removeFavorite,
+        favoriteLois,
+        isFavoriteLoi,
+        toggleFavoriteLoi,
+        removeFavoriteLoi,
+        favoriteChemicals,
+        isFavoriteChemical,
+        toggleFavoriteChemical,
+        removeFavoriteChemical,
         collections,
         createCollection,
         renameCollection,

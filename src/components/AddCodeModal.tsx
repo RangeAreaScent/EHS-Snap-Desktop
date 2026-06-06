@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { searchCodes } from "../api";
-import { useAppData } from "../state";
-import type { SearchResult } from "../types";
+import { searchRegulations } from "../api";
+import { toCollectionItem, useAppData } from "../state";
+import type { RegulationSummary } from "../types";
 import { Modal } from "./Modal";
 
 interface Props {
@@ -12,7 +12,7 @@ interface Props {
 export function AddCodeModal({ collectionId, onClose }: Props) {
   const { addToCollection, removeFromCollection, isInCollection } = useAppData();
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [results, setResults] = useState<RegulationSummary[]>([]);
   const runId = useRef(0);
 
   useEffect(() => {
@@ -23,7 +23,7 @@ export function AddCodeModal({ collectionId, onClose }: Props) {
     }
     const id = ++runId.current;
     const timer = setTimeout(() => {
-      searchCodes(trimmed, 30)
+      searchRegulations(trimmed, 30)
         .then((res) => {
           if (id === runId.current) setResults(res);
         })
@@ -34,7 +34,7 @@ export function AddCodeModal({ collectionId, onClose }: Props) {
 
   return (
     <Modal
-      title="Add code"
+      title="Add regulation"
       onClose={onClose}
       footer={
         <button className="btn btn--primary" onClick={onClose}>
@@ -45,26 +45,26 @@ export function AddCodeModal({ collectionId, onClose }: Props) {
       <input
         className="text-input"
         autoFocus
-        placeholder="Search diagnosis or code…"
+        placeholder="Search citation, topic, or chemical…"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         spellCheck={false}
       />
       <div className="pick-list pick-list--tall">
         {results.map((r) => {
-          const inside = isInCollection(collectionId, r.code);
+          const inside = isInCollection(collectionId, r.regulationId);
           return (
             <button
-              key={r.code}
+              key={r.regulationId}
               className="pick-row"
               onClick={() =>
                 inside
-                  ? removeFromCollection(collectionId, r.code)
-                  : addToCollection(collectionId, r)
+                  ? removeFromCollection(collectionId, r.regulationId)
+                  : addToCollection(collectionId, toCollectionItem(r))
               }
             >
-              <span className="pick-row__code">{r.code}</span>
-              <span className="pick-row__name">{r.description}</span>
+              <span className="pick-row__code">{r.citation || r.regulationId}</span>
+              <span className="pick-row__name">{r.heading}</span>
               <span className="pick-row__check">{inside ? "✓" : "＋"}</span>
             </button>
           );

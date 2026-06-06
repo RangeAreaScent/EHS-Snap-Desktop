@@ -2,8 +2,12 @@ import { useState } from "react";
 import { Modal } from "./Modal";
 
 const EMOJI_CHOICES = [
-  "📁", "⭐", "🩺", "💊", "🫀", "🧠", "🦴", "👁️",
-  "🩹", "🧬", "🔬", "📋", "🏥", "🚑", "🧪", "❤️",
+  // PPE & hazards
+  "🦺", "⛑️", "🥽", "🧤", "⚠️", "🔥", "☢️", "☣️",
+  // Chemical & tools
+  "🧪", "⚗️", "🛢️", "🧯", "🔧", "⚙️", "🔒", "🔑",
+  // Industry & records
+  "🏭", "🏗️", "👷", "📋", "📁", "📌", "⭐", "📊",
 ];
 
 interface Props {
@@ -18,7 +22,7 @@ interface Props {
 export function CollectionFormModal({
   title,
   initialName = "",
-  initialEmoji = "📁",
+  initialEmoji = "🦺",
   submitLabel,
   onSubmit,
   onClose,

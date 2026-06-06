@@ -1,38 +1,54 @@
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import { getCodeDetail } from "./api";
+import { getRegulationDetail } from "./api";
 import type { Collection, NoteMap } from "./types";
 
 interface ExportEntry {
-  code: string;
-  description: string;
+  citation: string;
+  heading: string;
   note: string;
-  billable: string;
-  chapter: string;
-  block: string;
-  category: string;
+  agency: string;
+  subpart: string;
+  industry: string;
+  topics: string;
 }
 
-/** Enriches collection items with full CDC classification + the saved note.
- *  Block/category aren't stored on the collection item, so they're fetched
- *  fresh from the database at export time. */
+/** Enriches collection items with the full CFR hierarchy + the saved note.
+ *  Industry / topic_tags aren't stored on the collection item, so they're
+ *  fetched fresh from the database at export time. LOI / chemical items are
+ *  exported in a leaner shape (heading + sublabel only). */
 async function buildEntries(
   c: Collection,
   notes: NoteMap,
 ): Promise<ExportEntry[]> {
   const details = await Promise.all(
-    c.items.map((i) => getCodeDetail(i.code).catch(() => null)),
+    c.items.map((i) =>
+      i.kind === "regulation"
+        ? getRegulationDetail(i.id).catch(() => null)
+        : Promise.resolve(null),
+    ),
   );
   return c.items.map((item, idx) => {
     const d = details[idx];
+    if (item.kind === "regulation" && d) {
+      return {
+        citation: d.citation || d.regulationId,
+        heading: d.heading,
+        note: notes[d.regulationId]?.text ?? "",
+        agency: d.agency,
+        subpart: d.subpartLabel,
+        industry: d.industry,
+        topics: d.topicTags.join(", "),
+      };
+    }
     return {
-      code: item.code,
-      description: d?.description ?? item.description,
-      note: notes[item.code]?.text ?? "",
-      billable: (d?.isBillable ?? item.isBillable) ? "Yes" : "No",
-      chapter: d?.chapterDescription ?? item.chapterDescription,
-      block: d?.blockDescription ?? "",
-      category: d?.categoryDescription ?? "",
+      citation: item.sublabel || item.id,
+      heading: item.label,
+      note: notes[item.id]?.text ?? "",
+      agency: item.agency ?? "",
+      subpart: "",
+      industry: "",
+      topics: item.kind === "regulation" ? "" : item.kind.toUpperCase(),
     };
   });
 }
@@ -43,17 +59,15 @@ function csvCell(value: string): string {
 }
 
 const CSV_HEADER = [
-  "Code",
-  "Description",
+  "Citation",
+  "Heading",
   "Note",
-  "Billable",
-  "Chapter",
-  "Block",
-  "Category",
+  "Agency",
+  "Subpart",
+  "Industry",
+  "Topics",
 ];
 
-/** Opens a native save dialog and writes the collection as CSV.
- *  Returns false if the user cancelled. */
 export async function exportCollectionCSV(
   c: Collection,
   notes: NoteMap,
@@ -68,13 +82,13 @@ export async function exportCollectionCSV(
   const rows = [
     CSV_HEADER,
     ...entries.map((e) => [
-      e.code,
-      e.description,
+      e.citation,
+      e.heading,
       e.note,
-      e.billable,
-      e.chapter,
-      e.block,
-      e.category,
+      e.agency,
+      e.subpart,
+      e.industry,
+      e.topics,
     ]),
   ];
   const csv = rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
@@ -82,8 +96,6 @@ export async function exportCollectionCSV(
   return true;
 }
 
-/** Opens a native save dialog and writes the collection as a PDF
- *  (generated natively in Rust). Returns false if the user cancelled. */
 export async function exportCollectionPDF(
   c: Collection,
   notes: NoteMap,

@@ -20,7 +20,7 @@ const VALIDATE_URL: &str = "https://api.lemonsqueezy.com/v1/licenses/validate";
 const DEACTIVATE_URL: &str = "https://api.lemonsqueezy.com/v1/licenses/deactivate";
 const STORE_NAME: &str = "license";
 const OVERRIDE_STORE: &str = "premium_override";
-const INSTANCE_NAME: &str = "ICD Snap Desktop";
+const INSTANCE_NAME: &str = "EHS Snap Desktop";
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]

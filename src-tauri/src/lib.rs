@@ -1,6 +1,7 @@
 mod abbreviations;
-mod icd;
+mod ehs;
 mod license;
+mod menu;
 mod pdf;
 mod store;
 
@@ -13,22 +14,87 @@ struct AppState {
     data_dir: PathBuf,
 }
 
+// --------------------------------------------------------------------------
+//  Regulations
+// --------------------------------------------------------------------------
+
 #[tauri::command]
-fn search_codes(
+fn search_regulations(
     state: tauri::State<'_, AppState>,
     query: String,
     limit: Option<usize>,
-) -> Result<Vec<icd::SearchResult>, String> {
-    icd::search(&state.db_path, &query, limit.unwrap_or(50))
+    agency: Option<String>,
+) -> Result<Vec<ehs::RegulationSummary>, String> {
+    ehs::search_regulations(
+        &state.db_path,
+        &query,
+        limit.unwrap_or(50),
+        agency.as_deref(),
+    )
 }
 
 #[tauri::command]
-fn get_code_detail(
+fn get_regulation_detail(
     state: tauri::State<'_, AppState>,
-    code: String,
-) -> Result<Option<icd::CodeDetail>, String> {
-    icd::fetch_detail(&state.db_path, &code)
+    regulation_id: String,
+) -> Result<Option<ehs::RegulationDetail>, String> {
+    ehs::fetch_regulation_detail(&state.db_path, &regulation_id)
 }
+
+#[tauri::command]
+fn related_lois(
+    state: tauri::State<'_, AppState>,
+    section_number: String,
+    limit: Option<usize>,
+) -> Result<Vec<ehs::LoiSummary>, String> {
+    ehs::related_lois_for_section(&state.db_path, &section_number, limit.unwrap_or(8))
+}
+
+// --------------------------------------------------------------------------
+//  Letters of Interpretation
+// --------------------------------------------------------------------------
+
+#[tauri::command]
+fn search_lois(
+    state: tauri::State<'_, AppState>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<ehs::LoiSummary>, String> {
+    ehs::search_lois(&state.db_path, &query, limit.unwrap_or(50))
+}
+
+#[tauri::command]
+fn get_loi_detail(
+    state: tauri::State<'_, AppState>,
+    loi_id: String,
+) -> Result<Option<ehs::LoiDetail>, String> {
+    ehs::fetch_loi_detail(&state.db_path, &loi_id)
+}
+
+// --------------------------------------------------------------------------
+//  Chemicals
+// --------------------------------------------------------------------------
+
+#[tauri::command]
+fn search_chemicals(
+    state: tauri::State<'_, AppState>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<ehs::ChemicalSummary>, String> {
+    ehs::search_chemicals(&state.db_path, &query, limit.unwrap_or(50))
+}
+
+#[tauri::command]
+fn get_chemical_detail(
+    state: tauri::State<'_, AppState>,
+    substance_name: String,
+) -> Result<Option<ehs::ChemicalDetail>, String> {
+    ehs::fetch_chemical_detail(&state.db_path, &substance_name)
+}
+
+// --------------------------------------------------------------------------
+//  Store / export / license (shared shell — unchanged from ICD reference)
+// --------------------------------------------------------------------------
 
 #[tauri::command]
 fn store_read(state: tauri::State<'_, AppState>, name: String) -> Result<Option<String>, String> {
@@ -44,14 +110,11 @@ fn store_write(
     store::write(&state.data_dir, &name, &content)
 }
 
-/// Writes arbitrary text to a user-chosen path (the path comes from the
-/// native save dialog). Used by collection CSV export.
 #[tauri::command]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| format!("failed to write file: {e}"))
 }
 
-/// Renders a collection to a PDF at the user-chosen path.
 #[tauri::command]
 fn export_pdf(
     path: String,
@@ -61,13 +124,11 @@ fn export_pdf(
     pdf::export(&path, &title, &entries)
 }
 
-/// Returns the locally stored license state without any network call.
 #[tauri::command]
 fn license_status(state: tauri::State<'_, AppState>) -> license::LicenseState {
     license::status(&state.data_dir)
 }
 
-/// Activates a license key for this machine (online).
 #[tauri::command]
 fn license_activate(
     state: tauri::State<'_, AppState>,
@@ -76,13 +137,11 @@ fn license_activate(
     license::activate(&state.data_dir, &key)
 }
 
-/// Re-validates the stored license (online, with offline grace).
 #[tauri::command]
 fn license_validate(state: tauri::State<'_, AppState>) -> license::LicenseState {
     license::validate(&state.data_dir)
 }
 
-/// Releases this machine's activation slot.
 #[tauri::command]
 fn license_deactivate(
     state: tauri::State<'_, AppState>,
@@ -90,7 +149,6 @@ fn license_deactivate(
     license::deactivate(&state.data_dir)
 }
 
-/// Toggles the hidden premium override (demo / testing unlock).
 #[tauri::command]
 fn license_toggle_override(
     state: tauri::State<'_, AppState>,
@@ -106,18 +164,31 @@ pub fn run() {
         .setup(|app| {
             let db_path = app
                 .path()
-                .resolve("resources/icd10cm_2026.sqlite", tauri::path::BaseDirectory::Resource)
-                .expect("bundled ICD database resource is missing");
+                .resolve(
+                    "resources/ehs_snap_v1.sqlite",
+                    tauri::path::BaseDirectory::Resource,
+                )
+                .expect("bundled EHS database resource is missing");
             let data_dir = app
                 .path()
                 .app_data_dir()
                 .expect("could not resolve app data directory");
             app.manage(AppState { db_path, data_dir });
+            // Phase D: install the native menu bar.
+            menu::install(app.handle())?;
             Ok(())
         })
+        .on_menu_event(|app, event| {
+            menu::handle(app, event.id().as_ref());
+        })
         .invoke_handler(tauri::generate_handler![
-            search_codes,
-            get_code_detail,
+            search_regulations,
+            get_regulation_detail,
+            related_lois,
+            search_lois,
+            get_loi_detail,
+            search_chemicals,
+            get_chemical_detail,
             store_read,
             store_write,
             write_text_file,

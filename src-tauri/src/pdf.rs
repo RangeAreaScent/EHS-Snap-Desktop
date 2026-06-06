@@ -13,14 +13,15 @@ const NANUM_REGULAR: &[u8] = include_bytes!("../resources/fonts/NanumGothic-Regu
 const NANUM_BOLD: &[u8] = include_bytes!("../resources/fonts/NanumGothic-Bold.ttf");
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExportEntry {
-    pub code: String,
-    pub description: String,
+    pub citation: String,
+    pub heading: String,
     pub note: String,
-    pub billable: String,
-    pub chapter: String,
-    pub block: String,
-    pub category: String,
+    pub agency: String,
+    pub subpart: String,
+    pub industry: String,
+    pub topics: String,
 }
 
 // US Letter, in millimetres.
@@ -139,6 +140,42 @@ impl Layout {
         }
     }
 
+    /// Writes wrapped text centered horizontally on the page at the given
+    /// point size. Used for the title header. Width is estimated in
+    /// half-em units (`units(s) * 0.5 * font_size_mm`) and that estimate
+    /// is good enough to be visually centered on monospaced numerics + Latin.
+    fn text_centered(&mut self, s: &str, size: f32, bold: bool) {
+        let font = if bold {
+            self.bold.clone()
+        } else {
+            self.regular.clone()
+        };
+        let line_h = size * 1.34 * MM_PER_PT;
+        let avail = PAGE_W - 2.0 * MARGIN;
+        let unit_mm = 0.5 * size * MM_PER_PT;
+        for line in wrap(s, size, avail) {
+            if self.y < BOTTOM_LIMIT {
+                self.new_page();
+            }
+            let line_w = units(&line) as f32 * unit_mm;
+            let x_mm = ((PAGE_W - line_w) / 2.0).max(MARGIN);
+            let x = mm_to_pt(x_mm);
+            let y = mm_to_pt(self.y);
+            self.cur.push(Op::SetTextMatrix {
+                matrix: TextMatrix::Translate(Pt(x), Pt(y)),
+            });
+            self.cur.push(Op::SetFontSize {
+                size: Pt(size),
+                font: font.clone(),
+            });
+            self.cur.push(Op::WriteText {
+                items: vec![TextItem::Text(line)],
+                font: font.clone(),
+            });
+            self.y -= line_h;
+        }
+    }
+
     /// Writes wrapped text at the given point size and left indent (mm).
     fn text(&mut self, s: &str, size: f32, indent: f32, bold: bool) {
         let font = if bold {
@@ -196,33 +233,40 @@ pub fn export(path: &str, title: &str, entries: &[ExportEntry]) -> Result<(), St
 
     let mut layout = Layout::new(regular_id, bold_id);
 
-    layout.text(title, 18.0, 0.0, true);
+    // Round D — centered title + sub-meta header.
+    layout.text_centered(title, 18.0, true);
     layout.gap(1.5);
-    layout.text(
-        &format!("{} codes  -  ICD-10-CM FY 2026", entries.len()),
+    layout.text_centered(
+        &format!(
+            "{} item{}  ·  EHS Snap  ·  29 CFR 1910 + 30 CFR + OSHA LOI",
+            entries.len(),
+            if entries.len() == 1 { "" } else { "s" },
+        ),
         9.0,
-        0.0,
         false,
     );
     layout.gap(5.0);
 
     for e in entries {
-        layout.text(&e.code, 13.0, 0.0, true);
-        layout.text(&e.description, 10.5, 0.0, false);
+        layout.text(&e.citation, 13.0, 0.0, true);
+        layout.text(&e.heading, 10.5, 0.0, false);
         if !e.note.trim().is_empty() {
             layout.text(&format!("Note: {}", e.note), 9.5, 5.0, false);
         }
-        let mut meta = format!("Billable: {}", e.billable);
-        if !e.chapter.is_empty() {
-            meta.push_str(&format!("   |   Chapter: {}", e.chapter));
+        let mut meta = format!("Agency: {}", e.agency);
+        if !e.subpart.is_empty() {
+            meta.push_str(&format!("   |   Subpart: {}", e.subpart));
         }
-        if !e.block.is_empty() {
-            meta.push_str(&format!("   |   Block: {}", e.block));
+        if !e.industry.is_empty() {
+            meta.push_str(&format!("   |   Industry: {}", e.industry));
         }
-        if !e.category.is_empty() {
-            meta.push_str(&format!("   |   Category: {}", e.category));
+        if !e.topics.is_empty() {
+            meta.push_str(&format!("   |   Topics: {}", e.topics));
         }
         layout.text(&meta, 8.5, 5.0, false);
+        // Plain vertical gap between entries — explicit hr() lines turned
+        // out to clash with text at certain font/line-height combinations,
+        // so we rely on whitespace alone for separation.
         layout.gap(4.5);
     }
 
@@ -238,23 +282,23 @@ pub fn export(path: &str, title: &str, entries: &[ExportEntry]) -> Result<(), St
 mod tests {
     use super::*;
 
-    fn entry(code: &str, note: &str) -> ExportEntry {
+    fn entry(citation: &str, note: &str) -> ExportEntry {
         ExportEntry {
-            code: code.into(),
-            description: "Essential (primary) hypertension with a fairly long \
-                description so word wrapping and page flow are exercised"
+            citation: citation.into(),
+            heading: "The control of hazardous energy (lockout/tagout) — \
+                a fairly long heading so word wrapping and page flow are exercised"
                 .into(),
             note: note.into(),
-            billable: "Yes".into(),
-            chapter: "Diseases of the circulatory system".into(),
-            block: "Hypertensive diseases".into(),
-            category: "Essential (primary) hypertension".into(),
+            agency: "OSHA".into(),
+            subpart: "Subpart J".into(),
+            industry: "General Industry".into(),
+            topics: "lockout, tagout, energy isolation".into(),
         }
     }
 
     #[test]
     fn produces_a_valid_ascii_pdf() {
-        let path = std::env::temp_dir().join("icdsnap_pdf_ascii.pdf");
+        let path = std::env::temp_dir().join("ehssnap_pdf_ascii.pdf");
         let path = path.to_str().unwrap();
         let entries: Vec<ExportEntry> = (0..40)
             .map(|i| entry(&format!("I{i:02}"), if i % 3 == 0 { "Check coverage" } else { "" }))
@@ -268,7 +312,7 @@ mod tests {
 
     #[test]
     fn produces_a_small_korean_pdf() {
-        let path = std::env::temp_dir().join("icdsnap_pdf_korean.pdf");
+        let path = std::env::temp_dir().join("ehssnap_pdf_korean.pdf");
         let path = path.to_str().unwrap();
         let entries = vec![entry("I10", "환자 본태성 고혈압 — 보험 확인 필요")];
         export(path, "고혈압 모음", &entries).expect("korean export should succeed");

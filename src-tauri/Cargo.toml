@@ -1,12 +1,12 @@
 [package]
-name = "icdsnap"
+name = "ehssnap"
 version = "1.0.0"
-description = "ICD Snap — fast offline ICD-10-CM code lookup"
+description = "EHS Snap — offline OSHA 29 CFR 1910 + MSHA 30 CFR + LOI + NIOSH chemical reference"
 authors = ["Ryan"]
 edition = "2021"
 
 [lib]
-name = "icdsnap_lib"
+name = "ehssnap_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
