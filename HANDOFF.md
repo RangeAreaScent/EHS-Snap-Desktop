@@ -6,7 +6,7 @@
 - **Wave:** 3 (Field track)
 - **Stage:** 2 features — v1.1 complete + SNAP_DESKTOP Phase A~D + Polish Pack rounds A~D applied 2026-06-06 (keyboard nav, splitter, ⌘K palette, native menubar, status bar, Tauri ask(), How-to-Use modal, multi-select favorites, PDF polish, 2×2 copy grid, search sort). tsc 0 errors; Rust 10/10; vite 340 KB / 102 KB gzip.
 - **Last updated:** 2026-06-06
-- **Repo:** not yet pushed — local-only iCloud Drive folder until series-wide signing block lifts (~2026-06-30)
+- **Repo:** https://github.com/RangeAreaScent/EHS-Snap-Desktop (public, pushed 2026-06-06; commit `cc981a4` carries the full v1.0+v1.1 + Phase A~D + Polish payload on top of ICD Snap fork base `c3c7e6a`).
 - **Latest release:** none
 - **Latest CI:** n/a (no CI yet)
 - **Bundle id:** com.ryan.ehssnap
@@ -40,9 +40,9 @@
   - **Multi-kind AddToCollectionModal** — `AddToCollectionModal` now accepts `CollectionTarget` union (`regulation | loi | chemical`). `LoiDetailView` and `ChemicalDetailView` each gained a `＋` folder button wired to the modal. `state.tsx`: `addToCollection` takes `CollectionItem` directly; `toLoiCollectionItem` + `toChemicalCollectionItem` helpers exported. `AddCodeModal` updated to use `toCollectionItem` helper. tsc 0 errors.
   - **iOS parallel** — `AddToCollectionSheet` on iOS likewise unified under `CollectionTarget` enum; `AddLOIToCollectionSheet` + `AddChemicalToCollectionSheet` removed. BUILD SUCCEEDED.
 - **Next 3 steps:**
-  1. Visual smoke test of Phase A~D + Polish in a running window — verify ⌘K filters push, multi-select 📁/🗑 flow, How-to-Use modal opens from menu, 2×2 copy grid collapses at narrow widths, PDF rendering with grey rules + centered header.
-  2. When the signing block lifts (~2026-06-30): create GitHub repo `EHS-Snap-Desktop` (public) · copy ICD's CI workflow · cut v1.0.0 tag · sign + notarize DMG · publish Mac universal + Windows MSI/NSIS.
-  3. iOS back-port candidates from this round (see IMPROVEMENT_PLAN §10.8): `ask()` audit on iOS (`confirmationDialog`), How-to-Use NavigationLink in Settings Help, PDF row separators in `CollectionExporter`.
+  1. When the signing block lifts (~2026-06-30): copy ICD's CI workflow into `.github/workflows/`, cut v1.0.0 tag, sign + notarize DMG, publish Mac universal + Windows MSI/NSIS.
+  2. Universal binary support (`--target universal-apple-darwin`) once CI is wired — current build verified aarch64 only.
+  3. Windows MSI cross-compile smoke test (`npm run tauri build --target x86_64-pc-windows-msvc`) when the toolchain is set up.
 - **Report-back trigger:** any commit on main, any tag push, dataset swap, SPEC change, new blocker, Stage transition.
 <!-- snap-series:manager-block:end -->
 
