@@ -222,8 +222,12 @@ function AppShell() {
   // `menu:<id>`; we forward to the same handlers the keyboard uses.
   useEffect(() => {
     const unlistens: Array<Promise<() => void>> = [];
+    // Tauri 2 rejects '.' in event names; menu.rs swaps '.' → '_' on emit,
+    // so we mirror that here. IDs keep the dotted form in source for
+    // readability. See SNAP_DESKTOP_IMPROVEMENT_PLAN.md §10.9.1.
     function on(id: string, fn: () => void) {
-      unlistens.push(listen(`menu:${id}`, fn));
+      const wire = `menu:${id.replace(/\./g, "_")}`;
+      unlistens.push(listen(wire, fn));
     }
 
     // File

@@ -251,7 +251,16 @@ pub fn handle(app: &AppHandle<Wry>, id: &str) {
         }
         "help.niosh_link" => open_url(app, "https://www.cdc.gov/niosh/npg/"),
         other => {
-            let _ = app.emit(&format!("menu:{other}"), ());
+            // Tauri 2 rejects event names containing '.' (only [A-Za-z0-9-/:_]
+            // allowed). Menu IDs keep the dotted form for readability; on the
+            // wire we substitute '_'. The React listener does the same swap.
+            // Plan §10.9.1 — previously `let _ = app.emit(...)` swallowed the
+            // InvalidName error and every UI-routed menu item silently failed.
+            let event_name = format!("menu:{}", other.replace('.', "_"));
+            match app.emit(&event_name, ()) {
+                Ok(()) => eprintln!("[menu] emitted: {event_name}"),
+                Err(e) => eprintln!("[menu] EMIT FAILED for {event_name}: {e}"),
+            }
         }
     }
 }
